@@ -34,17 +34,19 @@ void welcome_screen(char SerialCommand[])
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0); // Start at top-left corner
   display.print(F("Tran Thi Lan Anh"));
+
+  // Hiển thị tên mạng BLE mà thiết bị phát ra
+  display.setCursor(0, 18);
   if (SerialCommand == nullptr || SerialCommand[0] == '\0')
   {
-    display.setCursor(0, 40);
-    display.print(F("Khong co mang BLE"));
+    display.print(F("Default_BLE"));
   }
   else
   {
-    display.setCursor(0, 40);
-    display.print(F("Ten mang BLE: "));
+    display.print(F("BLE :"));
     display.print(SerialCommand);
   }
+
   display.display();
   delay(4000); // Giữ màn hình trong 4 giây
 
