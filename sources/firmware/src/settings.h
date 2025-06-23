@@ -61,10 +61,10 @@
 /// Tên mặc định của mạng BLE Bluetooth
 #define DEFAULT_BLENAME "Foot Keyboard"
 /// Default setting của các phím pedal
-#define DEFAULT_FEATURE_PEDAL_00 "{PGDN}"
-#define DEFAULT_FEATURE_PEDAL_01 "{PGUP}"
-#define DEFAULT_FEATURE_PEDAL_02 "cos{ENTER}"
-#define DEFAULT_FEATURE_PEDAL_03 "vawsng{ENTER}"
+#define DEFAULT_FEATURE_PEDAL_00 "{LEFT}"
+#define DEFAULT_FEATURE_PEDAL_01 "{RIGHT}"
+#define DEFAULT_FEATURE_PEDAL_02 "{UP}"
+#define DEFAULT_FEATURE_PEDAL_03 "{DOWN}"
 // #define DEFAULT_FEATURE_PEDAL_03 "{CTRL}{F4}{~CTRL}"
 // #define DEFAULT_FEATURE_PEDAL_03 "Hello"
 
@@ -79,6 +79,12 @@
 
 // define the number of bytes you want to access. 32 kí tự chứa thông tin phần BLE Name
 #define EEPROM_SIZE (MAX_KEY_CODE * MAX_BUTTONS + MAX_SCALAR_AREA)
+
+// 2 phút (120 giây) timeout sleep mode
+#define MAX_IDLE 60 * 1000
+
+// #define WAKEUP_BY_TIMER
+#define WAKEUP_BY_PEDAL
 
 void ResetFactorySetting();
 

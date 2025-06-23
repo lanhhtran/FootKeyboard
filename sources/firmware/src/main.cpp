@@ -25,6 +25,10 @@
 #include "ledeffects.h"
 #include "ssd1306.h" // Điều khiển màn hình oled
 #include "configuration.h"
+#include "esp_sleep.h"
+#include "driver/rtc_io.h"
+#include "keymatrix.h"
+#include "keymatrix.h"
 
 /**
  * @brief 4 trạng thái của phím bấm, tạo thành chu trình 4 bước gồm sườn, mức bấm. sườn, mức nhả.
@@ -49,6 +53,13 @@ unsigned long TimeOfPreLoop;
  * @brief  Handler điều khiển giao tiếp HID Keyboard BLE
  */
 BleKeyboardBuilder bleKeyboardBuilder(DEFAULT_BLENAME, "NDT Device Manufacturer", 100);
+
+/**
+ * @brief Biến quản lý sleep mode
+ *
+ */
+unsigned long lastActionTime = 0;
+bool sleepModeEnabled = true;
 
 /**
  * @brief Chế độ tự kiểm tra các chức năng hoạt động, dành cho DEV và QA
@@ -116,6 +127,10 @@ bool TryToConnect()
 void setup()
 {
     uint8_t i;
+    // pinMode(PIN_PEDAL00, INPUT_PULLUP);
+    // pinMode(PIN_PEDAL01, INPUT_PULLUP);
+    // pinMode(PIN_PEDAL02, INPUT_PULLUP);
+    // pinMode(PIN_PEDAL03, INPUT_PULLUP);
 
     // Cấu hình cho chân pin led mặc định
     pinMode(LED_BUILTIN, OUTPUT);
@@ -255,7 +270,9 @@ void setup()
     // Led sáng,  báo hiệu kết nối bluetooth thành công
     digitalWrite(LED_BUILTIN, LED_ON);
 
+    // Hiển thị màn hình welcome
     welcome_screen(SerialCommand);
+
     // Đánh dấu thời điểm bắt đầu chạy vòng lặp.
 #ifdef DEBUG_VERBOSE
     Serial.println("Kiem tra chuc nang Selt_Test co duoc kich hoat khong?");
@@ -286,6 +303,16 @@ void setup()
     Serial.println("Khoi tao xong.");
 #endif
 #endif
+
+    setup_keymatrix();
+
+    // // Cấu hình RTC GPIO để giữ pull-up khi sleep
+    // rtc_gpio_pullup_en((gpio_num_t)PIN_PEDAL00);
+    // rtc_gpio_pullup_en((gpio_num_t)PIN_PEDAL01);
+    // rtc_gpio_pullup_en((gpio_num_t)PIN_PEDAL02);
+    // rtc_gpio_pullup_en((gpio_num_t)PIN_PEDAL03);
+    // Khởi tạo thời gian hoạt động
+    lastActionTime = millis();
 }
 
 /** Xác định trạng thái phim bấm trong chu trình DOWN, PRESS, UP, FREE */
@@ -327,7 +354,53 @@ void loop()
     {
         return;
     }
-    TimeOfPreLoop = currentMillis; // Đã vượt qua none-blocking delay
+    TimeOfPreLoop = currentMillis; // Đã vượt qua none-blocking delay    // Kiểm tra hoạt động của pedal và cập nhật thời gian
+    if (digitalRead(PIN_PEDAL00) == LOW || digitalRead(PIN_PEDAL01) == LOW ||
+        digitalRead(PIN_PEDAL02) == LOW || digitalRead(PIN_PEDAL03) == LOW ||
+        is_matrix_active())
+    {
+        Serial.println("Pedal 00: " + String(digitalRead(PIN_PEDAL00)));
+        Serial.println("Pedal 01: " + String(digitalRead(PIN_PEDAL01)));
+        Serial.println("Pedal 02: " + String(digitalRead(PIN_PEDAL02)));
+        Serial.println("Pedal 03: " + String(digitalRead(PIN_PEDAL03)));
+        lastActionTime = millis();
+        Serial.println("Button pressed!");
+    }
+    if (millis() - lastActionTime >= MAX_IDLE)
+    {
+        bleKeyboardBuilder.end();
+        Serial.println("Entering light sleep...");
+        delay(100);          // Đảm bảo tất cả các lệnh Serial được gửi đi trước khi ngủ
+        show_sleep_screen(); // Hiển thị màn hình sleep
+
+#ifdef WAKEUP_BY_PEDAL
+        esp_sleep_enable_ext0_wakeup(GPIO_NUM_15, 0); // Phải cấu hình lại
+        rtc_gpio_pullup_en(GPIO_NUM_15);              // Đảm bảo pull-up
+#endif
+
+#ifdef WAKEUP_BY_TIMER
+        esp_sleep_enable_timer_wakeup(5 * 1000000); // Backup timer 5s
+#endif
+
+        esp_light_sleep_start();
+        // esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_EXT1); // Tắt nguồn đánh thức từ các chân GPIO
+        // TryToConnect();               // Kết nối lại sau khi thức dậy
+        // welcome_screen_afterwakeup(); // Hiển thị màn hình sau khi thức dậy
+        // if (!bleKeyboardBuilder.isConnected())
+        // {
+        //     // Nếu đã thử reconnect mà vẫn không được, reset lại BLE object hoặc cả ESP32
+        //     esp_restart();
+        // }
+        welcome_screen_afterwakeup();
+        esp_restart(); // Khởi động lại ESP32 sau khi thức dậy
+        Serial.println("Woken up from light sleep");
+        lastActionTime = millis(); // Cậtétp nhật lại thời gian sau khi thức dậy
+    }
+    delay(100);
+    // main_screen(); // Hiển thị màn hình chính
+    // welcome_screen(SerialCommand); // Hiển thị màn hình welcome
+
+    loop_keymatrix(); // key matrix
     //--------------PHASE 1: đọc trạng thái các nút bấm/pedal
     for (i = 0; i < MAX_BUTTONS; i++)
     {
@@ -375,7 +448,39 @@ void loop()
         {
             if (button_status[i] == KEYDOWN)
             {
-                bleKeyboardBuilder.SendKeys(button_sendkeys[i]); // bleKeyboardBuilder.write(KEY_PAGE_DOWN);
+                if (matrix_keys[4].state == KEY_PINNED)
+                {
+                    switch (i)
+                    {
+                    case 00:
+                        bleKeyboardBuilder.SendKeys("YES"); // bleKeyboardBuilder.write(KEY_PAGE_UP);
+                        break;
+                    case 01:
+                        bleKeyboardBuilder.SendKeys("NO"); // bleKeyboardBuilder.write(KEY_PAGE_DOWN);
+                        break;
+                    case 02:
+                    {
+                        char enter_cmd[] = {0xE0, 0}; // 0x28 là ASCII của ENTER
+                        bleKeyboardBuilder.SendKeys(enter_cmd);
+                        break;
+                    }
+                    case 03:
+                    {
+                        char backspace_cmd[] = {0x08, 0}; // ASCII backspace
+                        bleKeyboardBuilder.SendKeys(backspace_cmd);
+                        break;
+                    }
+                    default:
+                        break;
+                    }
+                }
+                else
+                {
+                    bleKeyboardBuilder.SendKeys(button_sendkeys[i]); // bleKeyboardBuilder.write(KEY_PAGE_DOWN);
+                    Serial.print("test phim pedal" + String(button_sendkeys[i]));
+                }
+                // bleKeyboardBuilder.SendKeys("Lan Anh");
+                // bleKeyboardBuilder.SendKeys("Lan Anh {ENTER}");
             }
         }
 #ifdef DEBUG_VERBOSE

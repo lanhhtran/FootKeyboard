@@ -19,6 +19,7 @@
  **************************************************************************/
 
 #include "ssd1306.h"
+#include "keymatrix.h"
 
 #define OLED_RESET -1       // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
@@ -48,10 +49,58 @@ void welcome_screen(char SerialCommand[])
   }
 
   display.display();
-  delay(4000); // Giữ màn hình trong 4 giây
+  delay(2000); // Giữ màn hình trong 3 giây
 
   display.clearDisplay(); // Xoá màn hình sau 2 giây
   display.display();      // Cập nhật để áp dụng xoá
+}
+
+/**
+ * @brief Hiển thị màn hình chào mừng sau khi thức dậy
+ */
+void welcome_screen_afterwakeup(void)
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 2);
+  display.print(F("Wake up from sleep"));
+
+  display.setCursor(0, 10);
+  display.print(F("Ready to use"));
+
+  display.display();
+  delay(2000); // Giữ màn hình trong 2 giây
+
+  display.clearDisplay();
+  display.display();
+}
+
+/**
+ * @brief Hiển thị màn hình sleep mode
+ */
+void show_sleep_screen(void)
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 2);
+  display.print(F("SLEEP MODE IN :"));
+  // Hướng dẫn với text trắng
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 12);
+  display.print(F("Press pedal 00"));
+  display.setCursor(0, 20);
+  display.print(F("to wake up"));
+  for (int i = 3; i >= 0; i--)
+  {
+    oled_show_number(i); // Hàm tự viết, hiện số lên màn hình
+    delay(1000);         // Chờ 1 giây
+  }
+  display.display();
+  delay(100);
+  display.clearDisplay();
+  display.display(); // Cập nhật để áp dụng xoá
 }
 void main_screen(void)
 {
@@ -118,6 +167,113 @@ void setup_oled()
 void show_pedal(unsigned char no)
 
 {
-  display.drawChar(95, 0, (no + 0x30), SSD1306_WHITE, SSD1306_BLACK, 3);
+  display.fillRect(105, 0, 24, 24, SSD1306_BLACK);
+  display.drawChar(105, 0, (no + 0x30), SSD1306_WHITE, SSD1306_BLACK, 3);
+  display.display();
+}
+
+void oled_show_number(int n)
+{
+  display.fillRect(100, 2, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(100, 2);
+  display.print(n);
+  display.display();
+}
+
+/**
+ * @brief Hiển thị phím ma trận được bấm
+ */
+void show_matrix_key(uint8_t keyIndex, KEY_STATE state)
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // 1. Ưu tiên: Nếu phím A đang PINNED, hiển thị menu đặc biệt
+  if (matrix_keys[0].state == KEY_PINNED)
+  {
+    display.setCursor(0, 0);
+    display.print(F("MENU: "));
+    display.setCursor(0, 9);
+    display.println(F("B: YESNO MODE"));
+    display.println(F("C: TEXT ON 9KEYS MODE"));
+    display.println(F("D: D MODE"));
+    display.display();
+    return;
+  }
+
+  // 2. Nếu đang ở Mode B/C/D (phím B/C/D đang PINNED), hiển thị tên mode ở đầu
+  if (matrix_keys[4].state == KEY_PINNED)
+  {
+    display.setCursor(0, 0);
+    display.print(F("Mode B"));
+  }
+  else if (matrix_keys[8].state == KEY_PINNED)
+  {
+    display.setCursor(0, 0);
+    display.print(F("Mode C"));
+  }
+  else if (matrix_keys[12].state == KEY_PINNED)
+  {
+    display.setCursor(0, 0);
+    display.print(F("Mode D"));
+  }
+
+  // 3. Thông tin phím được thao tác (hiển thị ở dòng tiếp theo)
+  display.setTextSize(1);
+  display.setCursor(0, 12);
+  display.print(F("Key: "));
+  display.print(matrix_keys[keyIndex].label);
+
+  // 4. Trạng thái phím
+  display.setCursor(48, 12);
+  switch (state)
+  {
+  case KEY_PRESSED:
+    display.print(F("PRESSED"));
+    break;
+  case KEY_PINNED:
+    display.print(F("PINNED ON"));
+    break;
+  default:
+    if (keyIndex == 0 || keyIndex == 4 || keyIndex == 8 || keyIndex == 12)
+    {
+      display.print(F("UNPINNED"));
+    }
+    else
+    {
+      display.print(F("RELEASED"));
+    }
+    break;
+  }
+
+  // 5. Nếu là các phím đặc biệt (A/B/C/D) và vừa bị UNPINNED thì báo reset phía dưới
+  if (state != KEY_PINNED && (keyIndex == 0 || keyIndex == 4 || keyIndex == 8 || keyIndex == 12))
+  {
+    display.setCursor(0, 22);
+    display.print(F("FootKeyboard Reset!"));
+    display.display();
+    delay(1000);
+    display.clearDisplay();
+  }
+
+  display.display();
+}
+
+/**
+ * @brief Hiển thị preview ký tự T9 đang nhập
+ */
+void show_t9_preview(uint8_t digit, uint8_t press_count)
+{
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // Hiển thị tiêu đề
+  display.setCursor(0, 0);
+  display.print(F("T9 Mode - Key: "));
+  display.print(digit);
   display.display();
 }
